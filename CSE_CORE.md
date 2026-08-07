@@ -14,7 +14,7 @@
 
 **Resume stack:** C++, Python, SQL. FastAPI, REST APIs, SQLAlchemy, Pydantic, async programming. PostgreSQL, Redis. Kafka, event-driven architecture, pub/sub. System design, rate limiting, caching, idempotency, fault tolerance, concurrency control. Docker, Docker Compose, Git, GitHub Actions, CI/CD, Prometheus, Grafana, **Linux**.
 
-**Target:** Nutanix Intern / Member of Technical Staff, 11 Aug 2026.
+**Target:** Nutanix Intern / Member of Technical Staff
 
 **Job description — primary skills:** Python, C++, exposure to RESTful APIs, distributed systems. Good to know: JS/HTML/CSS/React. Exposure to Django/Rails/NodeJS/SQL.
 
