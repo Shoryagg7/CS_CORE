@@ -1,10 +1,10 @@
 # SQL & DBMS — Zero to Master (from absolute scratch)
 
 > Start here, before everything else in
-> [Backend_Interview_Zero_to_Master.md](Backend_Interview_Zero_to_Master.md).
+> [deliveriq/docs/INTERVIEW_PREP.md](../deliveriq/docs/INTERVIEW_PREP.md).
 > SQL is the one skill every backend/SDE interview tests directly — a dedicated
-> round at most companies — and it's the foundation Levels 1–2 of the backend
-> guide build on. This doc assumes you know **nothing** and takes you to
+> round at most companies — and it's the foundation §2 (persistence) and §5
+> (concurrency) of that guide build on. This doc assumes you know **nothing** and takes you to
 > interview-master level: **concept (why)** → **diagram (see it)** →
 > **soundbite / trap** → **practice (do it)**.
 >
@@ -686,9 +686,10 @@ cruising.
    WHERE vs HAVING · index trade-off · ACID
 
 Re-run this list every weekend. When it's all reflex, SQL is done — move to
-[Backend_Interview_Zero_to_Master.md](Backend_Interview_Zero_to_Master.md)
-Level 2 (it continues exactly where Level 7 here points), and keep 2–3
-LeetCode SQL problems per week as maintenance reps.
+[deliveriq/docs/INTERVIEW_PREP.md](../deliveriq/docs/INTERVIEW_PREP.md) §2
+(persistence) and §5 (transactions, isolation, locking), which continue exactly
+where Level 7 here points, and keep 2–3 LeetCode SQL problems per week as
+maintenance reps.
 
 ---
 ---
