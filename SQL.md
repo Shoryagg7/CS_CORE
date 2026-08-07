@@ -12,6 +12,12 @@
 > every query against your **own DeliverIQ tables** (orders, riders) —
 > practicing on a schema you built makes it stick *and* gives you interview
 > talking points.
+>
+> ⚡ **In a hurry?** Jump to the
+> [PostgreSQL Syntax Cheat Sheet](#appendix--postgresql-syntax-cheat-sheet) at
+> the end — pure syntax, no teaching, built for the 15-minute skim before a
+> round. The levels below are how you *learn* it; the appendix is how you
+> *revise* it.
 
 ---
 
@@ -683,3 +689,441 @@ Re-run this list every weekend. When it's all reflex, SQL is done — move to
 [Backend_Interview_Zero_to_Master.md](Backend_Interview_Zero_to_Master.md)
 Level 2 (it continues exactly where Level 7 here points), and keep 2–3
 LeetCode SQL problems per week as maintenance reps.
+
+---
+---
+
+# APPENDIX — PostgreSQL syntax cheat sheet
+
+> **Purpose: revision, not learning.** Everything here is explained *why* above;
+> this page is the *what*, in the order you'd reach for it while writing a query.
+> Dialect is **PostgreSQL** throughout — MySQL-only syntax is marked ❌ so you
+> don't reach for it out of habit on LeetCode.
+
+## A.1 Query skeleton + execution order ⭐
+
+```sql
+SELECT   ...          -- 5. compute output columns (windows run HERE)
+FROM     ...          -- 1. get the table(s)
+JOIN     ... ON ...   -- 1. stitch them together
+WHERE    ...          -- 2. filter ROWS      (no aggregates, no aliases, no windows)
+GROUP BY ...          -- 3. form groups
+HAVING   ...          -- 4. filter GROUPS    (aggregates allowed here)
+ORDER BY ...          -- 6. sort            (aliases OK, windows OK)
+LIMIT n OFFSET m;     -- 7. cut
+```
+
+`FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY → LIMIT` — you write
+SELECT first, the engine runs it fifth. Three consequences you *will* hit:
+no SELECT alias in `WHERE`, no `COUNT(*)` in `WHERE` (use `HAVING`), no window
+function in `WHERE` (wrap in a CTE, then filter). → §1.2, §5.4
+
+## A.2 SELECT & aliasing
+
+```sql
+SELECT col AS alias            -- AS is optional but write it
+SELECT t.col, t2.col           -- qualify when joining
+SELECT DISTINCT col            -- de-duplicate the whole output row
+SELECT *                       -- fine while exploring, never in app code
+SELECT 1                       -- constant — the idiom inside EXISTS
+```
+
+## A.3 WHERE — row filter
+
+```sql
+WHERE col = v      <>  !=  >  >=  <  <=
+WHERE col IN (1, 2, 3)              WHERE col NOT IN (...)   -- ⚠️ NULL trap, §4.2
+WHERE col BETWEEN 10 AND 20         -- inclusive both ends
+WHERE col LIKE  'A%'                -- % = any chars, _ = exactly one
+WHERE col ILIKE 'a%'                -- case-insensitive LIKE (Postgres)
+WHERE col ~ '^A.*z$'                -- POSIX regex match  (~* = case-insensitive)
+WHERE col IS NULL                   WHERE col IS NOT NULL
+WHERE col IS DISTINCT FROM 5        -- like <> but NULL-safe (NULL counts as different)
+WHERE a AND b OR c                  -- AND binds tighter than OR → parenthesise
+WHERE NOT (a AND b)
+```
+
+## A.4 JOINs
+
+```sql
+FROM orders o
+INNER JOIN riders r ON o.rider_id = r.id   -- only matching rows
+LEFT  JOIN riders r ON o.rider_id = r.id   -- all LEFT rows, right side NULL-padded
+RIGHT JOIN riders r ON o.rider_id = r.id   -- all RIGHT rows
+FULL  OUTER JOIN riders r ON o.rider_id = r.id
+CROSS JOIN riders                          -- cartesian product (no ON)
+
+JOIN riders r USING (id)                   -- shorthand when column names match
+NATURAL JOIN riders                        -- joins on ALL same-named cols — avoid
+
+-- self join: same table, two aliases
+FROM riders a JOIN riders b ON a.cell = b.cell AND a.id < b.id
+
+-- LATERAL: right side may reference the left row (top-N per group without a window)
+FROM riders r
+CROSS JOIN LATERAL (
+  SELECT * FROM orders o WHERE o.rider_id = r.id ORDER BY o.value DESC LIMIT 3
+) top3
+```
+
+⚠️ On a **LEFT JOIN**, a condition about the **right** table goes in `ON` — put
+it in `WHERE` and the NULL-padded rows fail the filter, silently turning it into
+an INNER JOIN. → §3.4
+
+## A.5 GROUP BY / HAVING
+
+```sql
+GROUP BY status, rider_id
+GROUP BY 1, 2                       -- by output position (Postgres allows it)
+HAVING COUNT(*) > 5                 -- filters groups; WHERE can't see aggregates
+GROUP BY GROUPING SETS ((a), (b))   -- multiple groupings in one pass
+GROUP BY ROLLUP (a, b)              -- subtotals + grand total
+```
+
+Every SELECT column must be **in the GROUP BY** or **inside an aggregate**.
+
+## A.6 Aggregate functions
+
+```sql
+COUNT(*)                 -- counts ROWS (NULLs included)
+COUNT(col)               -- counts NON-NULL values
+COUNT(DISTINCT col)
+SUM(col)   AVG(col)   MIN(col)   MAX(col)
+ROUND(AVG(col)::NUMERIC, 2)          -- AVG returns float8; cast before ROUND(,n)
+STRING_AGG(col, ', ' ORDER BY col)   -- join group values into one string
+ARRAY_AGG(col ORDER BY col)          -- collect group values into an array
+BOOL_OR(cond)   BOOL_AND(cond)       -- "any row / every row satisfies"
+
+-- FILTER ⭐ Postgres-only: conditional aggregate = pivot in one line
+SELECT rider_id,
+       COUNT(*) FILTER (WHERE status = 'DELIVERED') AS delivered,
+       COUNT(*) FILTER (WHERE status = 'CANCELLED') AS cancelled
+FROM orders GROUP BY rider_id;
+-- portable equivalent: SUM(CASE WHEN status = 'DELIVERED' THEN 1 ELSE 0 END)
+```
+
+**All aggregates ignore NULLs**, and `AVG`/`SUM` over an empty set return
+**NULL, not 0** — wrap in `COALESCE(...,0)` when a number is required. → §2.3
+
+## A.7 ORDER BY / LIMIT
+
+```sql
+ORDER BY value DESC, created_at ASC    -- ASC is the default
+ORDER BY 2 DESC                        -- by output column position
+ORDER BY value DESC NULLS LAST         -- Postgres: NULLs sort FIRST on DESC by default
+LIMIT 10 OFFSET 20                     -- OFFSET n skips n rows first
+FETCH FIRST 10 ROWS ONLY               -- ANSI spelling of LIMIT
+
+-- DISTINCT ON ⭐ Postgres-only: first row per key. Leading ORDER BY cols must
+-- match the DISTINCT ON cols. Shortest "latest row per group" there is.
+SELECT DISTINCT ON (rider_id) *
+FROM orders ORDER BY rider_id, created_at DESC;
+```
+
+## A.8 CASE — conditional logic
+
+```sql
+CASE WHEN score >= 90 THEN 'A'
+     WHEN score >= 80 THEN 'B'
+     ELSE 'C'                       -- omit ELSE → unmatched rows get NULL
+END AS grade
+
+CASE status WHEN 'PENDING' THEN 1 ELSE 0 END    -- short form, equality only
+```
+
+Usable anywhere an expression goes — inside `SUM()`, in `ORDER BY`, in `WHERE`.
+
+## A.9 NULL handling
+
+```sql
+COALESCE(a, b, 0)      -- first non-NULL argument
+NULLIF(a, b)           -- NULL when a = b, else a  → guards divide-by-zero:
+                       --   x / NULLIF(y, 0)
+GREATEST(a,b)  LEAST(a,b)
+IFNULL(col, 0)         -- ❌ MySQL only        → COALESCE
+ISNULL(col)            -- ❌ MySQL/T-SQL only  → col IS NULL
+```
+
+## A.10 String functions
+
+```sql
+CONCAT(a, ' ', b)            -- NULL-safe (treats NULL as '')
+a || ' ' || b                -- || operator: any NULL makes the whole thing NULL
+LENGTH(col)                  CHAR_LENGTH(col)
+UPPER(col)                   LOWER(col)               INITCAP(col)  -- Title Case
+TRIM(col)   LTRIM(col)   RTRIM(col)   TRIM(BOTH 'x' FROM col)
+SUBSTRING(col FROM 1 FOR 3)  SUBSTRING(col, 1, 3)     -- both work
+LEFT(col, 3)                 RIGHT(col, 3)
+REPLACE(col, 'a', 'b')
+POSITION('a' IN col)         STRPOS(col, 'a')         -- 1-based, 0 if absent
+SPLIT_PART(col, ',', 1)      -- nth field of a delimited string
+LPAD(col, 5, '0')            RPAD(col, 5, ' ')
+REPEAT('ab', 3)              REVERSE(col)
+REGEXP_REPLACE(col, '[0-9]', '', 'g')
+TO_CHAR(1234.5, 'FM999999.00')          -- number → formatted string
+```
+
+⚠️ Postgres strings are **1-indexed**. `UPPER(LEFT(name,1)) || LOWER(SUBSTRING(name,2))`
+is the classic "capitalise the name" LeetCode answer.
+
+## A.11 Date / time
+
+```sql
+CURRENT_DATE      CURRENT_TIMESTAMP      NOW()        -- now() = timestamptz
+AGE(d1, d2)                          -- difference as a readable interval
+d1 - d2                              -- date - date → INTEGER days
+                                     -- ts  - ts   → INTERVAL
+date_col + INTERVAL '1 day'          date_col - INTERVAL '7 days'
+DATE_TRUNC('month', ts)              -- floor to month/day/hour/week/year
+EXTRACT(YEAR  FROM d)   EXTRACT(MONTH FROM d)   EXTRACT(DAY FROM d)
+EXTRACT(DOW   FROM d)                -- day of week, 0 = Sunday
+EXTRACT(EPOCH FROM (t2 - t1)) / 60   -- interval → minutes
+TO_CHAR(d, 'YYYY-MM')                -- format to string ('YYYY-MM-DD', 'Mon', 'HH24:MI')
+TO_DATE('2026-01-31', 'YYYY-MM-DD')  -- string → date
+d::DATE                              -- strip the time part off a timestamp
+GENERATE_SERIES('2026-01-01'::date, '2026-01-31'::date, '1 day')  -- date spine
+```
+
+⚠️ `DATEDIFF()` / `DATE_ADD()` / `DATE_SUB()` are ❌ MySQL — use `-` and
+`INTERVAL`. For "consecutive days," `d2 - d1 = 1` works directly on dates.
+
+## A.12 Window functions ⭐
+
+```sql
+FUNC() OVER (PARTITION BY grp ORDER BY sort_col [frame])
+-- no PARTITION BY → one window over the whole result set
+
+ROW_NUMBER() OVER (PARTITION BY status ORDER BY value DESC)  -- 1,2,3 — ties broken arbitrarily
+RANK()       OVER (...)                                      -- 1,1,3 — ties share, then SKIP
+DENSE_RANK() OVER (...)                                      -- 1,1,2 — ties share, no skip
+NTILE(4)     OVER (ORDER BY value)                           -- quartile bucket
+
+LAG(col)      OVER (ORDER BY d)      -- previous row's value  (LAG(col, 2, 0) = offset, default)
+LEAD(col)     OVER (ORDER BY d)      -- next row's value
+FIRST_VALUE(col) OVER (...)          LAST_VALUE(col) OVER (...)   -- ⚠️ needs an explicit frame
+NTH_VALUE(col, 2) OVER (...)
+
+SUM(value)   OVER (ORDER BY d)                    -- running total
+SUM(value)   OVER (PARTITION BY status)           -- group total, rows NOT collapsed
+AVG(value)   OVER (ORDER BY d ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)  -- 7-row moving avg
+COUNT(*)     OVER ()                              -- total row count on every row
+
+-- reuse one window definition across several columns
+SELECT ROW_NUMBER() OVER w, SUM(value) OVER w
+FROM orders WINDOW w AS (PARTITION BY status ORDER BY value DESC);
+```
+
+Frames: `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` (default with
+`ORDER BY`) · `... AND UNBOUNDED FOLLOWING` · `RANGE` counts *values*, `ROWS`
+counts *rows*.
+
+⚠️ Windows compute at **SELECT** time → they cannot appear in `WHERE`/`HAVING`.
+Wrap in a CTE and filter outside. → §5.4
+
+## A.13 Subqueries & CTEs
+
+```sql
+-- scalar (one value)
+SELECT * FROM orders WHERE value > (SELECT AVG(value) FROM orders);
+
+-- list
+SELECT * FROM riders WHERE id IN (SELECT rider_id FROM orders);
+
+-- derived table — the alias is MANDATORY in Postgres
+SELECT * FROM (SELECT ... ) AS sub;
+
+-- correlated: inner query sees the outer row → re-runs per row
+SELECT * FROM orders o
+WHERE o.value > (SELECT AVG(i.value) FROM orders i WHERE i.status = o.status);
+
+-- CTE: name your steps, chain them
+WITH delivered AS (
+    SELECT rider_id, COUNT(*) AS n FROM orders
+    WHERE status = 'DELIVERED' GROUP BY rider_id
+),
+busy AS (SELECT * FROM delivered WHERE n > 5)
+SELECT r.name, b.n FROM busy b JOIN riders r ON r.id = b.rider_id;
+
+-- recursive CTE: base case UNION ALL recursive step
+WITH RECURSIVE chain AS (
+    SELECT id, manager_id, 1 AS depth FROM emp WHERE id = 7   -- base
+    UNION ALL
+    SELECT e.id, e.manager_id, c.depth + 1                    -- step
+    FROM emp e JOIN chain c ON e.manager_id = c.id
+)
+SELECT * FROM chain;
+```
+
+## A.14 Set operations
+
+```sql
+SELECT ... UNION     SELECT ...   -- combine + de-duplicate (sort cost)
+SELECT ... UNION ALL SELECT ...   -- combine, keep duplicates — faster, default to this
+SELECT ... INTERSECT SELECT ...   -- rows in both
+SELECT ... EXCEPT    SELECT ...   -- rows in the first but not the second (MySQL: MINUS ❌)
+```
+
+Column **count and types** must line up; the first SELECT names the columns. One
+`ORDER BY` at the very end applies to the whole result.
+
+## A.15 EXISTS
+
+```sql
+WHERE     EXISTS (SELECT 1 FROM orders o WHERE o.rider_id = r.id)
+WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.rider_id = r.id)
+```
+
+`NOT EXISTS` is the **NULL-safe** way to say "has no match" — prefer it over
+`NOT IN` always. → §4.2
+
+## A.16 Type casting
+
+```sql
+col::INTEGER            -- Postgres shorthand
+CAST(col AS TEXT)       -- ANSI
+'2026-01-31'::DATE      123::TEXT      '12.5'::NUMERIC
+value::NUMERIC / 3      -- force numeric division…
+value * 1.0 / 3         -- …or multiply by 1.0. int/int truncates!
+```
+
+⚠️ `SELECT 1/2` → **0**. Cast before dividing — the single most common wrong
+answer on percentage/ratio problems.
+
+## A.17 Writing data
+
+```sql
+INSERT INTO orders (customer_id, value, status) VALUES (1, 250.0, 'PENDING');
+INSERT INTO orders (customer_id, value) SELECT id, 100 FROM customers;
+INSERT INTO orders (...) VALUES (...) RETURNING id;        -- ⭐ get the new PK back
+
+UPDATE orders SET status = 'CANCELLED', updated_at = now() WHERE id = 3;
+UPDATE orders o SET rider_name = r.name FROM riders r WHERE r.id = o.rider_id;
+DELETE FROM orders WHERE id = 3;
+
+-- UPSERT ⭐ Postgres: needs a UNIQUE/PK constraint on the conflict target
+INSERT INTO riders (id, name) VALUES (2, 'Asha')
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
+ON CONFLICT (id) DO NOTHING;
+
+BEGIN;  ...  COMMIT;      -- or ROLLBACK;  ← your undo button
+```
+
+⚠️ `UPDATE`/`DELETE` **without a WHERE hits every row.** Write the WHERE first,
+or run it as a `SELECT` first. → §6.1
+
+## A.18 DDL essentials
+
+```sql
+CREATE TABLE orders (
+    id          SERIAL PRIMARY KEY,         -- modern: GENERATED ALWAYS AS IDENTITY
+    customer_id INT NOT NULL,
+    value       NUMERIC(10,2) NOT NULL CHECK (value > 0),
+    status      TEXT NOT NULL DEFAULT 'PENDING',
+    rider_id    INT REFERENCES riders(id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (customer_id, created_at)
+);
+
+ALTER TABLE orders ADD COLUMN note TEXT;
+ALTER TABLE orders ALTER COLUMN note SET NOT NULL;
+ALTER TABLE orders DROP COLUMN note;
+ALTER TABLE orders RENAME COLUMN note TO remark;
+ALTER TABLE orders ADD CONSTRAINT chk_value CHECK (value > 0);
+
+CREATE INDEX idx_orders_status ON orders (status);
+CREATE UNIQUE INDEX ... ;    CREATE INDEX ... ON orders (status) WHERE status = 'PENDING';
+DROP TABLE orders;      TRUNCATE orders;      DROP INDEX idx_orders_status;
+CREATE VIEW v_busy AS SELECT ...;
+```
+
+Types: `INT/BIGINT` · `NUMERIC(p,s)` exact → **money** · `FLOAT` approximate →
+never money · `TEXT`/`VARCHAR(n)` (same perf in PG) · `BOOLEAN` · `TIMESTAMPTZ`
+(default to this) · `DATE` · `UUID` · `JSONB` · `TEXT[]`. → §6.2
+
+## A.19 Postgres-only moves worth remembering ⭐
+
+```sql
+SELECT DISTINCT ON (k) ...                 -- §A.7 — latest row per key, one line
+COUNT(*) FILTER (WHERE cond)               -- §A.6 — pivot without CASE
+GENERATE_SERIES(1, 10)                     -- a numbers/date table out of thin air
+col ILIKE 'a%'          col ~ 'regex'      -- case-insensitive / regex match
+ARRAY_AGG(x)   STRING_AGG(x, ',')   UNNEST(arr)     -- arrays: collapse & explode
+data->>'key'    data->'obj'->>'k'   data @> '{"a":1}'   -- JSONB: ->> text, -> json
+INSERT ... ON CONFLICT ... DO UPDATE       -- upsert
+... RETURNING *                            -- INSERT/UPDATE/DELETE return the rows
+EXPLAIN ANALYZE SELECT ...                 -- what the planner actually did
+```
+
+## A.20 MySQL habits that break on Postgres
+
+| MySQL ❌ | PostgreSQL ✅ |
+|---|---|
+| `IFNULL(a,0)` | `COALESCE(a,0)` |
+| `DATEDIFF(d1,d2)` | `d1 - d2` (dates → int days) |
+| `DATE_ADD(d, INTERVAL 1 DAY)` | `d + INTERVAL '1 day'` |
+| `NOW()` returns local naive ts | `now()` is `timestamptz`; `CURRENT_DATE` for dates |
+| `LIMIT 10, 20` | `LIMIT 20 OFFSET 10` |
+| `GROUP_CONCAT(col)` | `STRING_AGG(col, ',')` |
+| `"double quotes" as string` | double quotes = **identifier**; strings use `'single'` |
+| loose `GROUP BY` (bare columns) | every column grouped or aggregated — strictly enforced |
+| `SELECT ... FROM (…)` without alias | derived table **must** have an alias |
+| `MINUS` | `EXCEPT` |
+| backticks `` `col` `` | `"col"` |
+| `SUBSTRING_INDEX(s, ',', 1)` | `SPLIT_PART(s, ',', 1)` |
+| case-insensitive `=` by default | comparisons are **case-sensitive** — use `ILIKE`/`LOWER()` |
+
+## A.21 psql survival kit
+
+```
+psql -U postgres -d deliveriq       connect
+\l          list databases          \c dbname     switch database
+\dt         list tables             \d orders     describe a table
+\di         list indexes            \dn           list schemas
+\x          toggle expanded output (wide rows become readable)
+\timing     show query duration     \e            edit last query in $EDITOR
+\i file.sql run a script            \copy ... TO 'f.csv' CSV HEADER
+\q          quit
+```
+
+## A.22 Pattern templates (the ones interviewers reuse)
+
+```sql
+-- Nth highest (N=2), duplicate-safe
+SELECT DISTINCT value FROM orders ORDER BY value DESC OFFSET 1 LIMIT 1;
+-- or: DENSE_RANK() OVER (ORDER BY value DESC) = 2
+
+-- Duplicates
+SELECT col FROM t GROUP BY col HAVING COUNT(*) > 1;
+
+-- Top-N per group
+WITH r AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY status
+                                        ORDER BY value DESC) rn FROM orders)
+SELECT * FROM r WHERE rn <= 3;
+
+-- Rows with no match (anti-join)
+SELECT o.* FROM orders o LEFT JOIN riders r ON o.rider_id = r.id WHERE r.id IS NULL;
+-- or: WHERE NOT EXISTS (SELECT 1 FROM riders r WHERE r.id = o.rider_id)
+
+-- Day-over-day change
+SELECT d, v - LAG(v) OVER (ORDER BY d) AS delta FROM daily;
+
+-- Consecutive-days streak (gaps-and-islands)
+SELECT user_id, d - (ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY d)) * INTERVAL '1 day'
+       AS grp                       -- same grp ⇒ same unbroken streak
+FROM logins;
+
+-- Deduplicate, keep newest
+SELECT DISTINCT ON (key) * FROM t ORDER BY key, created_at DESC;
+
+-- Pivot (rows → columns)
+SELECT dept,
+       COUNT(*) FILTER (WHERE gender = 'M') AS male,
+       COUNT(*) FILTER (WHERE gender = 'F') AS female
+FROM emp GROUP BY dept;
+
+-- Percentage / ratio (cast to avoid integer division!)
+SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE status='DELIVERED') / COUNT(*), 2) AS pct
+FROM orders;
+```
+
+→ Full pattern explanations in [Level 8](#level-8--classic-interview-patterns-ongoing-reps).
